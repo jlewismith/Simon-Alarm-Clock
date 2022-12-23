@@ -1,83 +1,73 @@
-// Arduino DS3232RTC Library
-// https://github.com/JChristensen/DS3232RTC
-// Copyright (C) 2018 by Jack Christensen and licensed under
-// GNU GPL v3.0, https://www.gnu.org/licenses/gpl.html
-//
-// DS3231/DS3232 Alarm Example Sketch #1
-//
-// Set Alarm 1 to occur once a minute at 5 seconds after the minute.
-// Detect the alarm by polling the RTC alarm flag.
-/*
-  LiquidCrystal Library - Hello World
+/**
+ * Code for Simon Alarm Clock written by Jacob Smith.
+ * 
+ * Last updated December 2022
+ * 
+ * Hardware Used:
+ * Elegoo/Arduino Uno R3, DS3231 RTC (real-time clock), LCD display (Elegoo LCD1602), 
+ * 10K potentiometer, Passive buzzer, Switches (4), LEDs (4)
+ * 
+ * CONNECTIONS:
+ * 
+ * RTC
+ * Arduino A4 -> RTC SDA
+ * Arduino A5 -> RTC SCL
+ * 
+ * LCD
+ * Arduino 2 -> LCD D7
+ * Arduino 3 -> LCD D6
+ * Arduino 4 -> LCD D5
+ * Arduino 5 -> LCD D4
+ * Arduino 6 -> LCD E
+ * Arduino 7 -> LCD RS
+ * LCD R/W -> ground
+ * LCD VSS pin -> ground
+ * LCD VCC pin -> 5V
+ * LCD A -> ground (through 10K resistor)
+ * LCD V0 -> Potentiometer
+ * Potentiometer -> 5V & ground
+ * 
+ * LED's, Switches, Buzzer
+ * Arduino 9, 10, 11, 12 -> LED 1, 2, 3, 4 (through 10K resistors)
+ * Arduino A3, A2, A1, A0 -> Switch 1, 2, 3, 4
+ * Arduino 8 -> Buzzer
+ * Buzzer -> 5V
+ */
 
-  Demonstrates the use a 16x2 LCD display.  The LiquidCrystal
-  library works with all LCD displays that are compatible with the
-  Hitachi HD44780 driver. There are many of them out there, and you
-  can usually tell them by the 16-pin interface.
+/**  
+  Credit for example code sources (used as starting point) as follows:
 
-  This sketch prints "Hello World!" to the LCD
-  and shows the time.
+  ~~ SIMON ~~
+  Simon Game for Arduino
+  Copyright (C) 2016, Uri Shaked
+  Released under the MIT License.
 
-  The circuit:
-   LCD RS pin to digital pin 12
-   LCD Enable pin to digital pin 11
-   LCD D4 pin to digital pin 5
-   LCD D5 pin to digital pin 4
-   LCD D6 pin to digital pin 3
-   LCD D7 pin to digital pin 2
-   LCD R/W pin to ground
-   LCD VSS pin to ground
-   LCD VCC pin to 5V
-   10K resistor:
-   ends to +5V and ground
-   wiper to LCD VO pin (pin 3)
+  ///////////////////////////
 
-  Library originally added 18 Apr 2008
-  by David A. Mellis
-  library modified 5 Jul 2009
-  by Limor Fried (http://www.ladyada.net)
-  example added 9 Jul 2009
-  by Tom Igoe
-  modified 22 Nov 2010
-  by Tom Igoe
-  modified 7 Nov 2016
-  by Arturo Guadalupi
-
-  This example code is in the public domain.
-
+  ~~ LIQUID CRYSTAL DISPLAY HELLO WORLD ~
   http://www.arduino.cc/en/Tutorial/LiquidCrystalHelloWorld
 
-*/
+  ///////////////////////////
+
+  ~~ ALARM CLOCK ~~
+  Arduino DS3232RTC Library
+  https://github.com/JChristensen/DS3232RTC
+  Copyright (C) 2018 by Jack Christensen and licensed under
+  GNU GPL v3.0, https://www.gnu.org/licenses/gpl.html
+
+ */
+
 
 // include the library code:
 #include <LiquidCrystal.h>
 #include <DS3232RTC.h>      // https://github.com/JChristensen/DS3232RTC
 #include <Streaming.h>      // http://arduiniana.org/libraries/streaming/
+#include "pitches.h"
 
 // initialize the library by associating any needed LCD interface pin
 // with the arduino pin number it is connected to
-const int rs = 7, en = 6, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
-LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
-
-//
-// Hardware:
-// Arduino Uno, DS3231 RTC.
-// Connect RTC SDA to Arduino pin A4.
-// Connect RTC SCL to Arduino pin A5.
-//
-// Jack Christensen 16Sep2017
-
-#include <DS3232RTC.h>      // https://github.com/JChristensen/DS3232RTC
-#include <Streaming.h>      // http://arduiniana.org/libraries/streaming/
-
-/**
-   Simon Game for Arduino
-
-   Copyright (C) 2016, Uri Shaked
-
-   Released under the MIT License.
-*/
-#include "pitches.h"
+const int lcd_rs = 7, lcd_e = 6, lcd_d4 = 5, lcd_d5 = 4, lcd_d6 = 3, lcd_d7 = 2;
+LiquidCrystal lcd(lcd_rs, lcd_e, lcd_d4, lcd_d5, lcd_d6, lcd_d7);
 
 /* Constants - define pin numbers for LEDs,
    buttons and speaker, and also the game tones: */
@@ -87,7 +77,7 @@ const byte buttonPins[] = {A0, A1, A2, A3};
 
 #define MAX_GAME_LENGTH 5
 
-const int gameTones[] = { NOTE_G3, NOTE_C4, NOTE_E4, NOTE_G5};
+const int gameTones[] = {NOTE_G3, NOTE_C4, NOTE_E4, NOTE_G5};
 
 /* Global variables - store the game state */
 byte gameSequence[MAX_GAME_LENGTH] = {0};

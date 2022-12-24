@@ -69,6 +69,9 @@
 const int lcd_rs = 7, lcd_e = 6, lcd_d4 = 5, lcd_d5 = 4, lcd_d6 = 3, lcd_d7 = 2;
 LiquidCrystal lcd(lcd_rs, lcd_e, lcd_d4, lcd_d5, lcd_d6, lcd_d7);
 
+// define the RTC (realtime clock) component
+DS3232RTC rtc;
+
 /* Constants - define pin numbers for LEDs,
    buttons and speaker, and also the game tones: */
 const byte ledPins[] = {12, 11, 10, 9};
@@ -92,33 +95,41 @@ boolean awake = false;
 void setup()
 {
   Serial.begin(9600);
-  // SET UP CLOCK
-  // initialize the alarms to known values, clear the alarm flags, clear the alarm interrupt flags
-  RTC.setAlarm(ALM1_MATCH_DATE, 0, 0, 0, 1);
-  RTC.setAlarm(ALM2_MATCH_DATE, 0, 0, 0, 1);
-  RTC.alarm(ALARM_1);
-  RTC.alarm(ALARM_2);
-  RTC.alarmInterrupt(ALARM_1, false);
-  RTC.alarmInterrupt(ALARM_2, false);
-  RTC.squareWave(SQWAVE_NONE);
-
-  // set the RTC time and date to the compile time
-  RTC.set(compileTime());
-
-  // set Alarm 1 to occur at 5 seconds after every minute
-  RTC.setAlarm(ALM1_MATCH_SECONDS, 5, 0, 0, 1);
-  // clear the alarm flag
-  RTC.alarm(ALARM_1);
-
-  Serial << millis() << " Start ";
-  printDateTime(RTC.get());
-  Serial << endl;
 
   // SET UP DISPLAY
   // set up the LCD's number of columns and rows:
   lcd.begin(16, 2);
-  // Print a message to the LCD.
-  lcd.print("Simon Alarm Clk");
+
+  // SET UP CLOCK
+  rtc.begin();
+  // initialize the alarms to known values, clear the alarm flags, clear the alarm interrupt flags
+  rtc.setAlarm(DS3232RTC::ALM1_MATCH_DATE, 0, 0, 0, 1);
+  rtc.setAlarm(DS3232RTC::ALM2_MATCH_DATE, 0, 0, 0, 1);
+  rtc.alarm(DS3232RTC::ALARM_1);
+  rtc.alarm(DS3232RTC::ALARM_2);
+  rtc.alarmInterrupt(DS3232RTC::ALARM_1, false);
+  rtc.alarmInterrupt(DS3232RTC::ALARM_2, false);
+  rtc.squareWave(DS3232RTC::SQWAVE_NONE);
+
+  setSyncProvider(rtc.get);   // the function to get the time from the RTC
+
+  if(timeStatus() != timeSet)
+    while(true)
+      Serial.println("Unable to sync with the RTC");
+  else
+    Serial.println("RTC has set the system time");
+
+  // set the RTC time and date to the compile time
+  rtc.set(compileTime());
+
+  // set Alarm 1 to occur at 5 seconds after every minute
+  rtc.setAlarm(DS3232RTC::ALM1_MATCH_SECONDS, 5, 0, 0, 1);
+  // clear the alarm flag
+  rtc.alarm(DS3232RTC::ALARM_1);
+
+  Serial << millis() << " Start ";
+  printDateTime(rtc.get());
+  Serial << endl;
 
   // SET UP SIMON GAME
   for (byte i = 0; i < 4; i++) {
@@ -354,15 +365,17 @@ void playSimon()
 void loop()
 {
   lcd.setCursor(0, 0);
-  lcd.print("Simon Alarm Clk");
-  printDateTime(RTC.get());
-  if ( RTC.alarm(ALARM_1) )    // check alarm flag, clear it if set
+  // lcd.print("Simon Alarm Clk");
+  lcd.print("Alicia is bae");
+  printDateTime(rtc.get());
+  
+  if ( rtc.alarm(DS3232RTC::ALARM_1) )    // check alarm flag, clear it if set
   {
     lcd.setCursor(0, 0);
-    lcd.print("ALARM_1");
+    lcd.print("ALARM_1        ");
     ringing = true;
   }
-  if ( RTC.alarm(ALARM_2) )    // check alarm flag, clear it if set
+  if ( rtc.alarm(DS3232RTC::ALARM_2) )    // check alarm flag, clear it if set
   {
     lcd.setCursor(0, 0);
     lcd.print("ALARM_2");

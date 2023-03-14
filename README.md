@@ -37,4 +37,8 @@ Arduino A3, A2, A1, A0 -> Switch 1, 2, 3, 4
 Arduino 8 -> Buzzer
 Buzzer -> 5V
 ```
- 
+
+## Project simulation
+Part of the code was inspired by this project: https://wokwi.com/arduino/projects/libraries/demo/simon-game
+
+Using the `diagram.json` file, this project can hypothetically be simulated at https://wokwi.com. I have not updated it to include the clock display or RTC component. I'm not sure if they are available there to be simulated.

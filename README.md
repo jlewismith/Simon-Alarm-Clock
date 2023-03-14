@@ -9,10 +9,13 @@ Elegoo/Arduino Uno R3, DS3231 RTC (real-time clock), LCD display (Elegoo LCD1602
 ## Circuit Connections
 
 ### RTC
+```
 Arduino A4 -> RTC SDA
 Arduino A5 -> RTC SCL
+```
 
 ### LCD
+```
 Arduino 2 -> LCD D7
 Arduino 3 -> LCD D6
 Arduino 4 -> LCD D5
@@ -25,10 +28,13 @@ LCD VCC pin -> 5V
 LCD A -> ground (through 10K resistor)
 LCD V0 -> Potentiometer
 Potentiometer -> 5V & ground
+```
 
-LED's, Switches, Buzzer
+### LED's, Switches, Buzzer
+```
 Arduino 9, 10, 11, 12 -> LED 1, 2, 3, 4 (through 10K resistors)
 Arduino A3, A2, A1, A0 -> Switch 1, 2, 3, 4
 Arduino 8 -> Buzzer
 Buzzer -> 5V
+```
  

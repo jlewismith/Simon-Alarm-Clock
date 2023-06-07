@@ -1,7 +1,9 @@
-/**************************************************
-   This file defines constants with the frequency
-   of different musical notes.
- *************************************************/
+/**
+  A header file defining the pitches of musical notes
+*/
+
+#ifndef PITCHES_H
+#define PITCHES_H
 
 #define NOTE_B0  31
 #define NOTE_C1  33
@@ -92,3 +94,6 @@
 #define NOTE_CS8 4435
 #define NOTE_D8  4699
 #define NOTE_DS8 4978
+
+
+#endif

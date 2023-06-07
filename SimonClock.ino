@@ -58,36 +58,67 @@
  */
 
 
-// include the library code:
+// ========================================
+/* INCLUDES */
+// ========================================
+
 #include <LiquidCrystal.h>
 #include <DS3232RTC.h>      // https://github.com/JChristensen/DS3232RTC
 #include <Streaming.h>      // http://arduiniana.org/libraries/streaming/
 #include "pitches.h"
 
-// initialize the library by associating any needed LCD interface pin
-// with the arduino pin number it is connected to
-const int lcd_rs = 7, lcd_e = 6, lcd_d4 = 5, lcd_d5 = 4, lcd_d6 = 3, lcd_d7 = 2;
-LiquidCrystal lcd(lcd_rs, lcd_e, lcd_d4, lcd_d5, lcd_d6, lcd_d7);
+
+// ========================================
+/* GLOBALS */
+// ========================================
+
+
+/* OBJECTS */
 
 // define the RTC (realtime clock) component
 DS3232RTC rtc;
 
-/* Constants - define pin numbers for LEDs,
-   buttons and speaker, and also the game tones: */
-const byte ledPins[] = {12, 11, 10, 9};
-const byte buttonPins[] = {A0, A1, A2, A3};
-#define SPEAKER_PIN 8
+// initialize the library by associating any needed LCD interface pin
+// with the arduino pin number it is connected to
+const int LCD_RS = 7, LCD_E = 6, LCD_D4 = 5, LCD_D5 = 4, LCD_D6 = 3, LCD_D7 = 2;
+LiquidCrystal lcd(LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 
-#define MAX_GAME_LENGTH 5
 
-const int gameTones[] = {NOTE_G3, NOTE_C4, NOTE_E4, NOTE_G5};
+/* CONSTANTS */
 
-/* Global variables - store the game state */
-byte gameSequence[MAX_GAME_LENGTH] = {0};
+// Define pin numbers for LEDs, buttons and speaker
+const uint8_t SPEAKER_PIN = 8;
+const byte LED_PINS[] = {12, 11, 10, 9};
+const byte BUTTON_PINS[] = {A0, A1, A2, A3};
+
+// Define note sequences
+const int GAME_TONES[] = {NOTE_G3, NOTE_C4, NOTE_E4, NOTE_G5};
+const int ALARM_NOTES[] = {NOTE_C4, NOTE_F4, NOTE_A5, NOTE_F5, NOTE_C5, NOTE_A5};
+const int VICTORY_NOTES[] = {NOTE_E4, NOTE_G4, NOTE_E5, NOTE_C5, NOTE_D5, NOTE_G5};
+
+// Define other reference variables
+const unsigned long ALARM_DURATION_MS = 3000;
+const uint8_t BUTTON_COUNT = 4;
+const uint8_t MAX_GAME_ROUNDS = 5;
+const uint8_t DEFAULT_MODE = 0;
+const uint8_t ALARM_MODE = 5;
+
+
+/* GAME STATE */
+
+byte gameSequence[MAX_GAME_ROUNDS] = {0};
 byte gameIndex = 0;
 
 boolean ringing = false;
 boolean awake = false;
+
+uint8_t clockMode;
+bool pressedButtons[BUTTON_COUNT] = {false};
+
+
+// ========================================
+/* SETUP AND MAIN LOOP */
+// ========================================
 
 /**
    Set up the Arduino board and initialize Serial communication
@@ -127,82 +158,228 @@ void setup()
   // clear the alarm flag
   rtc.alarm(DS3232RTC::ALARM_1);
 
-  Serial << millis() << " Start ";
-  printDateTime(rtc.get());
-  Serial << endl;
-
   // SET UP SIMON GAME
   for (byte i = 0; i < 4; i++) {
-    pinMode(ledPins[i], OUTPUT);
-    pinMode(buttonPins[i], INPUT_PULLUP);
+    pinMode(LED_PINS[i], OUTPUT);
+    pinMode(BUTTON_PINS[i], INPUT_PULLUP);
   }
   pinMode(SPEAKER_PIN, OUTPUT);
   // The following line primes the random number generator.
   // It assumes pin A0 is floating (disconnected):
-  randomSeed(analogRead(A0));
+  // randomSeed(analogRead(A0));
+  randomSeed(rtc.get());
+}
+
+
+/**
+   The main loop
+*/
+void loop()
+{
+
+  if (millis() % 100 == 0 && rtc.alarm(DS3232RTC::ALARM_1)) 
+    clockMode = ALARM_MODE;
+
+  // check if mode should switch if alarm isn't triggered
+  if (clockMode != ALARM_MODE)
+  {
+    uint8_t buttonPress = getButtonPress();
+    if (buttonPress)
+    {
+      clockMode = buttonPress;
+    }
+  }
+
+  switch (clockMode)
+  {
+  case ALARM_MODE:
+    lcd.setCursor(0,0);
+    lcd.print("ALARM RINGING");
+    handleAlarm();
+    clockMode = DEFAULT_MODE;
+    break;
+
+  case DEFAULT_MODE:
+    lcd.setCursor(0,0);
+    lcd.print("Simon is cool");
+    printDateTime();
+    break;
+  }
+
+  // delay(100);                  // no need to bombard the RTC continuously
+}
+
+
+// ========================================
+/* ALARM FUNCTIONS */
+// ========================================
+
+void handleAlarm()
+{
+  unsigned long timeoutMillis = millis() + ALARM_DURATION_MS;
+
+  uint8_t button;
+  while (millis() < timeoutMillis)
+  {
+    button = playAlarmUntilInterrupted();
+    delay(500);
+    if (button && playSimon()) return;
+  }
+}
+
+uint8_t playAlarmUntilInterrupted()
+{
+  int notesCount = 6;
+  uint8_t button;
+  for (uint8_t i = 0; i < notesCount; i++)
+  {
+    tone(SPEAKER_PIN, ALARM_NOTES[i]);
+    delay(150);
+    noTone(SPEAKER_PIN);
+    button = getButtonPress();
+    if (button) return button;
+  }
+  return 0;
+}
+
+
+// ========================================
+/* SIMON FUNCTIONS */
+// ========================================
+
+/**
+ * @brief Plays the Simon game and returns whether the player won
+ * 
+ * @return true - win
+ * @return false - lose
+ */
+bool playSimon()
+{
+  for (uint8_t round = 0; round < MAX_GAME_ROUNDS; round++)
+  {
+    // Add a random color to the end of the sequence
+    gameSequence[gameIndex] = random(0, 4);
+    gameIndex++;
+
+    // Play current sequence
+    for (int i = 0; i < gameIndex; i++) 
+    {
+      byte currentLed = gameSequence[i];
+      lightLedAndPlayTone(currentLed);
+      delay(50);
+    }
+    if (!checkUserSequenceUntilTimeout()) {
+      Serial.print("Game over! your score: ");
+      Serial.println(gameIndex - 1);
+      gameIndex = 0;
+      delay(200);
+      playSadNotes();
+      return false;
+    }
+
+    delay(300);
+
+    // if (gameIndex > 0) {
+    //   playVictorySound();
+    //   delay(300);
+    // }
+  }
+  playVictoryNotes();
+  ringing = false;
+  awake = false;
+  gameIndex = 0;
+
+  return true;
 }
 
 /**
-   Lights the given LED and plays a suitable tone
-*/
+ * @brief Get the user's input and compare it with the expected sequence.
+ */
+bool checkUserSequenceUntilTimeout()
+{
+  for (int i = 0; i < gameIndex; i++) {
+    uint8_t expectedButton = gameSequence[i];
+    uint8_t actualButton;
+
+    unsigned long timeoutMillis = millis() + 3000;
+
+    while (millis() < timeoutMillis) 
+    {
+      actualButton = getButtonPress();
+      if (actualButton)
+      {
+        actualButton--;
+        break;
+      }
+      else actualButton = -1;
+    }
+
+    lightLedAndPlayTone(actualButton);
+
+    if (expectedButton != actualButton) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+
+// ========================================
+/* IO FUNCTIONS */
+// ========================================
+
+/**
+ * @brief Returns the number (not index) 
+ * of the button being pressed, or 0 if none are pressed. 
+ * 
+ * If multiple are pressed, the lowest numbered one will be returned.
+ */
+uint8_t getButtonPress()
+{
+  for (uint8_t i = 0; i < 4; i++) {
+    byte buttonPin = BUTTON_PINS[i];
+    if (digitalRead(buttonPin) == LOW) {
+      return i+1;
+    }
+  }
+  return 0;
+}
+
+/**
+ * @brief Lights the given LED and plays a suitable tone
+ * 
+ * @param ledIndex - index of the LED to be lit
+ */
 void lightLedAndPlayTone(byte ledIndex)
 {
-  digitalWrite(ledPins[ledIndex], HIGH);
-  tone(SPEAKER_PIN, gameTones[ledIndex]);
+  digitalWrite(LED_PINS[ledIndex], HIGH);
+  tone(SPEAKER_PIN, GAME_TONES[ledIndex]);
   delay(300);
-  digitalWrite(ledPins[ledIndex], LOW);
+  digitalWrite(LED_PINS[ledIndex], LOW);
   noTone(SPEAKER_PIN);
 }
 
 /**
-   Plays the current sequence of notes that the user has to repeat
-*/
-void playSequence()
+ * @brief Plays a victorious sound
+ */
+void playVictoryNotes()
 {
-  for (int i = 0; i < gameIndex; i++) {
-    byte currentLed = gameSequence[i];
-    lightLedAndPlayTone(currentLed);
-    delay(50);
+  int notesCount = 6;
+
+  for (int i = 0; i < notesCount; i++)
+  {
+    tone(SPEAKER_PIN, VICTORY_NOTES[i]);
+    delay(150);
+    noTone(SPEAKER_PIN); 
   }
 }
 
 /**
-    Waits until the user pressed one of the buttons,
-    and returns the index of that button
-*/
-byte readButtons()
+ * @brief Plays sad notes with a trill at the end
+ */
+void playSadNotes()
 {
-  while (true) {
-    for (byte i = 0; i < 4; i++) {
-      byte buttonPin = buttonPins[i];
-      if (digitalRead(buttonPin) == LOW) {
-        return i;
-      }
-    }
-    delay(1);
-  }
-}
-
-boolean checkForButtonPress()
-{
-  for (byte i = 0; i < 4; i++) {
-    byte buttonPin = buttonPins[i];
-    if (digitalRead(buttonPin) == LOW) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
-  Play the game over sequence, and report the game score
-*/
-void gameOver() {
-  Serial.print("Game over! your score: ");
-  Serial.println(gameIndex - 1);
-  gameIndex = 0;
-  delay(200);
-
   // Play a Wah-Wah-Wah-Wah sound
   tone(SPEAKER_PIN, NOTE_DS5);
   delay(300);
@@ -217,63 +394,18 @@ void gameOver() {
     }
   }
   noTone(SPEAKER_PIN);
-  delay(500);
 }
+
+
+// ========================================
+/* TIME FUNCTIONS */
+// ========================================
 
 /**
-   Get the user's input and compare it with the expected sequence.
-*/
-bool checkUserSequence()
-{
-  for (int i = 0; i < gameIndex; i++) {
-    byte expectedButton = gameSequence[i];
-    byte actualButton = readButtons();
-    lightLedAndPlayTone(actualButton);
-    if (expectedButton != actualButton) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/**
-   Plays a hooray sound whenever the user finishes a level
-*/
-void playVictorySound()
-{
-  tone(SPEAKER_PIN, NOTE_E4);
-  delay(150);
-  tone(SPEAKER_PIN, NOTE_G4);
-  delay(150);
-  tone(SPEAKER_PIN, NOTE_E5);
-  delay(150);
-  tone(SPEAKER_PIN, NOTE_C5);
-  delay(150);
-  tone(SPEAKER_PIN, NOTE_D5);
-  delay(150);
-  tone(SPEAKER_PIN, NOTE_G5);
-  delay(150);
-  noTone(SPEAKER_PIN);
-}
-
-void playAlarm()
-{
-  tone(SPEAKER_PIN, NOTE_C4);
-  delay(150);
-  tone(SPEAKER_PIN, NOTE_F4);
-  delay(150);
-  tone(SPEAKER_PIN, NOTE_A5);
-  delay(150);
-  tone(SPEAKER_PIN, NOTE_F5);
-  delay(150);
-  tone(SPEAKER_PIN, NOTE_C5);
-  delay(150);
-  tone(SPEAKER_PIN, NOTE_A5);
-  delay(150);
-  noTone(SPEAKER_PIN);
-}
-
+ * @brief Prints date and time using Serial object and << operators
+ * 
+ * @param t time_t object representing the time to print
+ */
 void serialPrintDateTime(time_t t)
 {
   Serial << ((day(t) < 10) ? "0" : "") << _DEC(day(t));
@@ -284,8 +416,12 @@ void serialPrintDateTime(time_t t)
   Serial << endl;
 }
 
-void printDateTime(time_t t)
+/**
+ * @brief Prints date and time to the lcd screen second row
+ */
+void printDateTime()
 {
+  time_t t = rtc.get();
   // set the cursor to column 0, row 1
   // (note: row 1 is the second row, since counting begins with 0):
   lcd.setCursor(0, 1);
@@ -309,8 +445,9 @@ void printDateTime(time_t t)
   lcd.print(second(t));
 }
 
-
-// function to return the compile date and time as a time_t value
+/**
+ * @brief Function to return the compile date and time as a time_t value
+ */
 time_t compileTime()
 {
   const time_t FUDGE(10);    //fudge factor to allow for upload time, etc. (seconds, YMMV)
@@ -331,71 +468,4 @@ time_t compileTime()
 
   time_t t = makeTime(tm);
   return t + FUDGE;        //add fudge factor to allow for compile time
-}
-
-void playSimon()
-{
-  // Add a random color to the end of the sequence
-  gameSequence[gameIndex] = random(0, 4);
-  gameIndex++;
-  if (gameIndex >= MAX_GAME_LENGTH) {
-    playVictorySound();
-    ringing = false;
-    awake = false;
-    gameIndex = 0;
-  }
-
-  playSequence();
-  if (!checkUserSequence()) {
-    gameOver();
-  }
-
-  delay(300);
-
-  // if (gameIndex > 0) {
-  //   playVictorySound();
-  //   delay(300);
-  // }
-
-}
-
-/**
-   The main loop
-*/
-void loop()
-{
-  lcd.setCursor(0, 0);
-  // lcd.print("Simon Alarm Clk");
-  lcd.print("Alicia is bae");
-  printDateTime(rtc.get());
-  
-  if ( rtc.alarm(DS3232RTC::ALARM_1) )    // check alarm flag, clear it if set
-  {
-    lcd.setCursor(0, 0);
-    lcd.print("ALARM_1        ");
-    ringing = true;
-  }
-  if ( rtc.alarm(DS3232RTC::ALARM_2) )    // check alarm flag, clear it if set
-  {
-    lcd.setCursor(0, 0);
-    lcd.print("ALARM_2");
-    ringing = true;
-  }
-
-  if (checkForButtonPress())
-  {
-    awake = true;
-  }
-
-  if (ringing && !awake)
-  {
-    playAlarm();
-  }
-
-  if (ringing && awake)
-  {
-    playSimon();
-  }
-
-  delay(100);                  // no need to bombard the RTC continuously
 }

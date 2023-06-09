@@ -1,7 +1,7 @@
 /**
  * Code for Simon Alarm Clock written by Jacob Smith.
  * 
- * Last updated December 2022
+ * Last updated June 2023
  * 
  * Hardware Used:
  * Elegoo/Arduino Uno R3, DS3231 RTC (real-time clock), LCD display (Elegoo LCD1602), 
@@ -87,21 +87,52 @@ LiquidCrystal lcd(LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 /* CONSTANTS */
 
 // Define pin numbers for LEDs, buttons and speaker
-const uint8_t SPEAKER_PIN = 8;
+const byte SPEAKER_PIN = 8;
 const byte LED_PINS[] = {12, 11, 10, 9};
 const byte BUTTON_PINS[] = {A0, A1, A2, A3};
 
+// Define button numbers
+const byte BUTTON_1 = 1;
+const byte BUTTON_2 = 2;
+const byte BUTTON_3 = 3;
+const byte BUTTON_4 = 4;
+
+// Define clock modes
+const byte MODE_DEFAULT = 0;
+const byte MODE_SET_ALARM = 1;
+const byte MODE_SET_CLOCK = 2;
+const byte MODE_PLAY_SIMON = 3;
+const byte MODE_ADJUST_SETTINGS = 4;
+const byte MODE_ALARM = 5;
+
 // Define note sequences
-const int GAME_TONES[] = {NOTE_G3, NOTE_C4, NOTE_E4, NOTE_G5};
-const int ALARM_NOTES[] = {NOTE_C4, NOTE_F4, NOTE_A5, NOTE_F5, NOTE_C5, NOTE_A5};
-const int VICTORY_NOTES[] = {NOTE_E4, NOTE_G4, NOTE_E5, NOTE_C5, NOTE_D5, NOTE_G5};
+const uint16_t GAME_TONES[] = {NOTE_G3, NOTE_C4, NOTE_E4, NOTE_G4};
+const uint16_t ALARM_NOTES[] = {NOTE_C4, NOTE_F4, NOTE_A5, NOTE_F5, NOTE_C5, NOTE_A5};
+const uint16_t VICTORY_NOTES[] = {NOTE_E4, NOTE_G4, NOTE_E5, NOTE_C5, NOTE_D5, NOTE_G5};
 
 // Define other reference variables
-const unsigned long ALARM_DURATION_MS = 3000;
-const uint8_t BUTTON_COUNT = 4;
-const uint8_t MAX_GAME_ROUNDS = 5;
-const uint8_t DEFAULT_MODE = 0;
-const uint8_t ALARM_MODE = 5;
+const unsigned long ALARM_DURATION_MS = 15000;
+const byte BUTTON_COUNT = 4;
+const byte MAX_GAME_ROUNDS = 16;
+
+
+/* ALARM STATE */
+
+/* 
+  These arrays store information about the alarm hours, minutes, seconds, and on/off status (in that order)
+  hours - alarm hour
+  minutes - alarm minute
+  seconds - alarm second
+  on/off - whether alarm is on or off (0 or 1)
+*/
+byte alarmSettings[4] = {8, 0, 0, 1}; // numbers representing the current alarm settings
+const char* alarmSettingNames[4] = {"hr ", "min", "sec", ""}; //  display names for each alarm setting
+byte alarmSettingMaxes[4] = {23, 59, 59, 1}; // max value for each setting
+
+byte alarmSettingIndex = 0; // stores the index to use with the above arrays
+
+// number of rounds to play to dismiss alarm
+byte simonAlarmRounds = 7;
 
 
 /* GAME STATE */
@@ -112,8 +143,16 @@ byte gameIndex = 0;
 boolean ringing = false;
 boolean awake = false;
 
-uint8_t clockMode;
+byte clockMode;
 bool pressedButtons[BUTTON_COUNT] = {false};
+
+
+/* FUNCTION DECLARATIONS */
+
+// these functions need declarations because they have default parameters
+byte incrementWithWrap(byte number, byte max, byte amount = 1);
+void printDateTime(short day, short month, short hour, short minute, short second = -1);
+bool playSimon(byte maxRounds = MAX_GAME_ROUNDS);
 
 
 // ========================================
@@ -127,21 +166,16 @@ void setup()
 {
   Serial.begin(9600);
 
-  // SET UP DISPLAY
+
+  /* SET UP DISPLAY */
+
   // set up the LCD's number of columns and rows:
   lcd.begin(16, 2);
 
-  // SET UP CLOCK
-  rtc.begin();
-  // initialize the alarms to known values, clear the alarm flags, clear the alarm interrupt flags
-  rtc.setAlarm(DS3232RTC::ALM1_MATCH_DATE, 0, 0, 0, 1);
-  rtc.setAlarm(DS3232RTC::ALM2_MATCH_DATE, 0, 0, 0, 1);
-  rtc.alarm(DS3232RTC::ALARM_1);
-  rtc.alarm(DS3232RTC::ALARM_2);
-  rtc.alarmInterrupt(DS3232RTC::ALARM_1, false);
-  rtc.alarmInterrupt(DS3232RTC::ALARM_2, false);
-  rtc.squareWave(DS3232RTC::SQWAVE_NONE);
 
+  /* SET UP CLOCK */
+  
+  rtc.begin();
   setSyncProvider(rtc.get);   // the function to get the time from the RTC
 
   if(timeStatus() != timeSet)
@@ -151,14 +185,30 @@ void setup()
     Serial.println("RTC has set the system time");
 
   // set the RTC time and date to the compile time
-  rtc.set(compileTime());
+  time_t compileTime = getCompileTime();
+  rtc.set(compileTime);
 
-  // set Alarm 1 to occur at 5 seconds after every minute
-  rtc.setAlarm(DS3232RTC::ALM1_MATCH_SECONDS, 5, 0, 0, 1);
-  // clear the alarm flag
+
+  /* SET UP ALARM */
+
+  // initialize the alarms to known values, clear the alarm flags, clear the alarm interrupt flags
+  rtc.setAlarm(DS3232RTC::ALM1_MATCH_HOURS, 0, 0, 0, 1);
+  rtc.setAlarm(DS3232RTC::ALM2_MATCH_DATE, 0, 0, 0, 1);
   rtc.alarm(DS3232RTC::ALARM_1);
+  rtc.alarm(DS3232RTC::ALARM_2);
+  rtc.alarmInterrupt(DS3232RTC::ALARM_1, false);
+  rtc.alarmInterrupt(DS3232RTC::ALARM_2, false);
+  rtc.squareWave(DS3232RTC::SQWAVE_NONE);
 
-  // SET UP SIMON GAME
+  // set alarm time to 10 seconds after compile time
+  alarmSettings[0] = (compileTime / 3600) % 24;
+  alarmSettings[1] = (compileTime / 60) % 60;
+  alarmSettings[2] = incrementWithWrap(compileTime % 60, 60, 10);
+  updateAlarmTime();
+
+
+  /* SET UP SIMON GAME */
+
   for (byte i = 0; i < 4; i++) {
     pinMode(LED_PINS[i], OUTPUT);
     pinMode(BUTTON_PINS[i], INPUT_PULLUP);
@@ -177,61 +227,160 @@ void setup()
 void loop()
 {
 
-  if (millis() % 100 == 0 && rtc.alarm(DS3232RTC::ALARM_1)) 
-    clockMode = ALARM_MODE;
-
-  // check if mode should switch if alarm isn't triggered
-  if (clockMode != ALARM_MODE)
+  if (alarmSettings[3] && rtc.alarm(DS3232RTC::ALARM_1)) 
   {
-    uint8_t buttonPress = getButtonPress();
-    if (buttonPress)
-    {
-      clockMode = buttonPress;
-    }
+    clockMode = MODE_ALARM;
   }
+
+  byte buttonPress = getButtonPress();
 
   switch (clockMode)
   {
-  case ALARM_MODE:
+  case MODE_ALARM:
     lcd.setCursor(0,0);
-    lcd.print("ALARM RINGING");
+    lcd.print("MODE: RING");
     handleAlarm();
-    clockMode = DEFAULT_MODE;
+    clockMode = MODE_DEFAULT;
     break;
 
-  case DEFAULT_MODE:
+  case MODE_SET_ALARM:
+    handleSetAlarm(buttonPress);
+    break;
+
+  case MODE_SET_CLOCK:
+    handleSetClock();
+    break;
+
+  case MODE_PLAY_SIMON:
     lcd.setCursor(0,0);
-    lcd.print("Simon is cool");
-    printDateTime();
+    lcd.print("SIMON");
+    playSimon();
+    clockMode = MODE_DEFAULT;
+    break;
+
+  case MODE_ADJUST_SETTINGS:
+    handleAdjustSettings();
+    break;
+
+  case MODE_DEFAULT:
+    // check if clock mode should change
+    if (buttonPress) { clockMode = buttonPress; }
+    lcd.setCursor(0,0);
+    printDateTime(rtc.get());
+    lcd.setCursor(0,1);
+    lcd.print("ALM CLK PLAY ADJ");
     break;
   }
 
-  // delay(100);                  // no need to bombard the RTC continuously
+  delay(200);
 }
 
+// ========================================
+/* MENU FUNCTIONS */
+// ========================================
+
+void handleAdjustSettings()
+{
+  // TODO
+  clockMode = MODE_DEFAULT;
+}
+
+void handleSetClock()
+{
+  // TODO
+  clockMode = MODE_DEFAULT;
+}
+
+void handleSetAlarm(byte buttonPress)
+{
+  lcd.setCursor(0,0);
+  lcd.print("SET ALARM       ");
+  lcd.setCursor(12,0);
+  lcd.print(alarmSettingNames[alarmSettingIndex]);
+
+  // todo use LiquidMenu
+  lcd.setCursor(0,1);
+  lcd.print(alarmSettingIndex == 0 ? ">" : " ");
+  lcd.print(alarmSettings[0]);
+  if (alarmSettingIndex == 0) lcd.print("<");
+  else lcd.print(alarmSettingIndex == 1 ? ">" : ":");
+  lcd.print(alarmSettings[1]);
+  if (alarmSettingIndex == 1) lcd.print("<");
+  else lcd.print(alarmSettingIndex == 2 ? ">" : ":");
+  lcd.print(alarmSettings[2]);
+  lcd.print(alarmSettingIndex == 2 ? "<" : " ");
+  lcd.print("       ");
+  lcd.setCursor(11,1);
+  lcd.print(alarmSettingIndex == 3 ? ">" : " ");
+  lcd.print(alarmSettings[3] ? "ON" : "OFF");
+  if (alarmSettingIndex == 3) lcd.print("<");
+
+  switch (buttonPress)
+  {
+  case BUTTON_1:
+    // exit the menu
+    clockMode = MODE_DEFAULT;
+    break;
+
+  case BUTTON_2:
+    alarmSettingIndex = incrementWithWrap(alarmSettingIndex, 3);
+    break;
+
+  case BUTTON_3:
+    alarmSettings[alarmSettingIndex] = decrementWithWraparound(alarmSettings[alarmSettingIndex], alarmSettingMaxes[alarmSettingIndex]);
+    updateAlarmTime();
+    break;
+
+  case BUTTON_4:
+    alarmSettings[alarmSettingIndex] = incrementWithWrap(alarmSettings[alarmSettingIndex], alarmSettingMaxes[alarmSettingIndex]);
+    updateAlarmTime();
+    break;
+  
+  default:
+    break;
+  }
+
+}
 
 // ========================================
-/* ALARM FUNCTIONS */
+/* ALARM / TIME FUNCTIONS */
 // ========================================
 
+/**
+ * @brief Updates alarm time based on the global alarmSettings variable
+ */
+void updateAlarmTime()
+{
+  rtc.setAlarm(DS3232RTC::ALM1_MATCH_HOURS, alarmSettings[2], alarmSettings[1], alarmSettings[0], 0);
+  rtc.alarm(DS3232RTC::ALARM_1);
+}
+
+/**
+ * @brief Handles playing the alarm until it is stopped or timeout occurs
+ */
 void handleAlarm()
 {
   unsigned long timeoutMillis = millis() + ALARM_DURATION_MS;
 
-  uint8_t button;
+  byte button;
   while (millis() < timeoutMillis)
   {
     button = playAlarmUntilInterrupted();
     delay(500);
-    if (button && playSimon()) return;
+    if (button && playSimon(simonAlarmRounds)) return;
   }
 }
 
-uint8_t playAlarmUntilInterrupted()
+/**
+ * @brief Plays an alarm sequence until timeout occurs or a button is pressed
+ * 
+ * @return byte 
+ */
+byte playAlarmUntilInterrupted()
 {
-  int notesCount = 6;
-  uint8_t button;
-  for (uint8_t i = 0; i < notesCount; i++)
+  int notesCount = sizeof(ALARM_NOTES) / sizeof(uint16_t);
+  byte button;
+  for (byte i = 0; i < notesCount; i++)
   {
     tone(SPEAKER_PIN, ALARM_NOTES[i]);
     delay(150);
@@ -253,10 +402,12 @@ uint8_t playAlarmUntilInterrupted()
  * @return true - win
  * @return false - lose
  */
-bool playSimon()
+bool playSimon(byte maxRounds = MAX_GAME_ROUNDS)
 {
-  for (uint8_t round = 0; round < MAX_GAME_ROUNDS; round++)
+  for (byte round = 0; round < maxRounds; round++)
   {
+    lcd.setCursor(0,0);
+    for (char i = 0; i < gameIndex; i++) lcd.print("$");
     // Add a random color to the end of the sequence
     gameSequence[gameIndex] = random(0, 4);
     gameIndex++;
@@ -298,8 +449,8 @@ bool playSimon()
 bool checkUserSequenceUntilTimeout()
 {
   for (int i = 0; i < gameIndex; i++) {
-    uint8_t expectedButton = gameSequence[i];
-    uint8_t actualButton;
+    byte expectedButton = gameSequence[i];
+    byte actualButton;
 
     unsigned long timeoutMillis = millis() + 3000;
 
@@ -335,9 +486,9 @@ bool checkUserSequenceUntilTimeout()
  * 
  * If multiple are pressed, the lowest numbered one will be returned.
  */
-uint8_t getButtonPress()
+byte getButtonPress()
 {
-  for (uint8_t i = 0; i < 4; i++) {
+  for (byte i = 0; i < 4; i++) {
     byte buttonPin = BUTTON_PINS[i];
     if (digitalRead(buttonPin) == LOW) {
       return i+1;
@@ -381,25 +532,20 @@ void playVictoryNotes()
 void playSadNotes()
 {
   // Play a Wah-Wah-Wah-Wah sound
-  tone(SPEAKER_PIN, NOTE_DS5);
+  tone(SPEAKER_PIN, NOTE_DS4);
   delay(300);
-  tone(SPEAKER_PIN, NOTE_D5);
+  tone(SPEAKER_PIN, NOTE_D4);
   delay(300);
-  tone(SPEAKER_PIN, NOTE_CS5);
+  tone(SPEAKER_PIN, NOTE_CS4);
   delay(300);
   for (byte i = 0; i < 10; i++) {
     for (int pitch = -10; pitch <= 10; pitch++) {
-      tone(SPEAKER_PIN, NOTE_C5 + pitch);
+      tone(SPEAKER_PIN, NOTE_C4 + pitch);
       delay(5);
     }
   }
   noTone(SPEAKER_PIN);
 }
-
-
-// ========================================
-/* TIME FUNCTIONS */
-// ========================================
 
 /**
  * @brief Prints date and time using Serial object and << operators
@@ -417,38 +563,82 @@ void serialPrintDateTime(time_t t)
 }
 
 /**
- * @brief Prints date and time to the lcd screen second row
+ * @brief Prints date and time given a time_t variable
  */
-void printDateTime()
+void printDateTime(time_t t)
 {
-  time_t t = rtc.get();
-  // set the cursor to column 0, row 1
-  // (note: row 1 is the second row, since counting begins with 0):
-  lcd.setCursor(0, 1);
-  // print the number of seconds since reset:
-  lcd.print((day(t) < 10) ? "0" : "");
-  lcd.print(day(t));
+  printDateTime(day(t), month(t), hour(t), minute(t), second(t));
+}
+
+/**
+ * @brief Prints date and time given each part of the date/time as a byte
+ * 
+ * @param day number representing day of the month
+ * @param month number representing the month
+ * @param hour number representing hours
+ * @param minute number representing minutes
+ * @param second number representing seconds (if negative or not passed, it will not be printed)
+ */
+void printDateTime(short day, short month, short hour, short minute, short second=-1)
+{
+  lcd.print(day < 10 ? "0" : "");
+  lcd.print(day);
   lcd.print(" ");
 
-  lcd.print(monthShortStr(month(t)));
+  lcd.print(monthShortStr(month));
   lcd.print(" ");
 
-  lcd.print((hour(t) < 10) ? "0" : "");
-  lcd.print(hour(t));
+  lcd.print((hour < 10) ? "0" : "");
+  lcd.print(hour);
   lcd.print(":");
 
-  lcd.print((minute(t) < 10) ? "0" : "");
-  lcd.print(minute(t));
+  lcd.print((minute < 10) ? "0" : "");
+  lcd.print(minute);
   lcd.print(":");
 
-  lcd.print((second(t) < 10) ? "0" : "");
-  lcd.print(second(t));
+  if (second > 0)
+  {
+    lcd.print((second < 10) ? "0" : "");
+    lcd.print(second);
+  }
+}
+
+
+// ========================================
+/* UTILITY FUNCTIONS */
+// ========================================
+
+/**
+ * @brief Increments an unsigned number by 1 or a specified amount, wrapping after a specified max
+ * 
+ * @param number number to increment
+ * @param max maximum value before wrapping on increment
+ * @param amount (optional) amount by which to increment (default is 1)
+ * @return byte the incremented number
+ */
+byte incrementWithWrap(byte number, byte max, byte amount)
+{
+  if (number == max) return 0;
+  else return number + amount;
+}
+
+/**
+ * @brief Decrements an unsigned number by 1, wrapping up to max after 0
+ * 
+ * @param number number to decrement
+ * @param max maximum value for the number
+ * @return byte the decremented number
+ */
+byte decrementWithWraparound(byte number, byte max)
+{
+  if (number == 0) return max;
+  else return number - 1;
 }
 
 /**
  * @brief Function to return the compile date and time as a time_t value
  */
-time_t compileTime()
+time_t getCompileTime()
 {
   const time_t FUDGE(10);    //fudge factor to allow for upload time, etc. (seconds, YMMV)
   const char *compDate = __DATE__, *compTime = __TIME__, *months = "JanFebMarAprMayJunJulAugSepOctNovDec";
